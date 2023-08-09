@@ -3,19 +3,11 @@ import torch
 from utils.data_utils import TextToAMRDataset, TextToAMRDataLoader
 from transformers import AutoModelForSeq2SeqLM, T5TokenizerFast
 from tqdm import tqdm
-import random
-import numpy as np
 import argparse
 
+from utils.eval import set_seed
 from utils.scoring import calc_corpus_bleu_score
 from utils.utils_argparser import add_args
-
-
-def set_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
 
 def test_process(args, tokenizer, model):
     model_type = "indo-t5"

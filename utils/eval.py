@@ -1,5 +1,13 @@
+import numpy as np
+import random
 import torch
 from utils.data_utils import T5_PREFIX
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
 def generate(text, model, tokenizer, num_beams, model_type, device='cpu'):
     if (model_type=='indo-bart'):
