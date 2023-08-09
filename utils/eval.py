@@ -36,9 +36,9 @@ def _generate_t5(text, model, tokenizer, num_beams, device):
     model.to(device)
     
     model.eval()
-    input_ids = tokenizer.encode(f"{T5_PREFIX}{text}", return_tensors="pt", add_special_tokens=False)  # Batch size 1
+    input_ids = tokenizer.encode(f"{T5_PREFIX}{text}", return_tensors="pt", add_special_tokens=True)  # Batch size 1
     input_ids = input_ids.to(device)
     outputs = model.generate(input_ids, num_beams=num_beams)
     
-    gen_text= tokenizer.decode(outputs[0], skip_special_tokens=True)
+    gen_text= tokenizer.decode(outputs[0], skip_special_tokens=False)
     return gen_text
