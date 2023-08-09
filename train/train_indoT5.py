@@ -1,24 +1,17 @@
-import pandas as pd
+import argparse
 import os
-import sys
-import torch
-from transformers import AutoModelForSeq2SeqLM, T5TokenizerFast
-from transformers.optimization import  AdamW, Adafactor 
-import time
-import warnings
-from tqdm import tqdm
-from sacrebleu import corpus_bleu
 import random
 import numpy as np
-import argparse
-
-
-sys.path.append('..')
+import torch
+from tqdm import tqdm
+from evaluate.evaluate_indoT5 import test_process
 from utils.constants import AMR_TOKENS
-from utils.data_utils import AMRToTextDataset, AMRToTextDataLoader
-from utils.scoring import calc_corpus_bleu_score
+from utils.data_utils import TextToAMRDataLoader, TextToAMRDataset
 from utils.eval import generate
+from utils.scoring import calc_corpus_bleu_score
 from utils.utils_argparser import add_args
+from transformers import AutoModelForSeq2SeqLM, T5TokenizerFast
+from transformers.optimization import AdamW
 
 def set_seed(seed):
     random.seed(seed)
@@ -30,8 +23,7 @@ def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-
-if __name__=='__main__':
+if __name__ == "__main__":
     parser = add_args(argparse.ArgumentParser())
     args = parser.parse_args()
 
@@ -51,9 +43,11 @@ if __name__=='__main__':
         saved_model_folder_path = args.saved_model_folder_path
 
 
+    cuda_used = False
     if torch.cuda.is_available():
         device = torch.device("cuda:0") 
         print("Running on the GPU")
+        cuda_used = True
     else:
         device = torch.device("cpu")
         print("Running on the CPU")
@@ -88,23 +82,17 @@ if __name__=='__main__':
     dev_amr_path = os.path.join(DATA_FOLDER, 'dev.amr.txt')
     dev_sent_path = os.path.join(DATA_FOLDER, 'dev.sent.txt')
 
-    test_amr_path = os.path.join(DATA_FOLDER, 'test.amr.txt')
-    test_sent_path = os.path.join(DATA_FOLDER, 'test.sent.txt')
+    # Change this, start here.
+    train_dataset = TextToAMRDataset(train_sent_path, train_amr_path, tokenizer, 'train')
+    dev_dataset = TextToAMRDataset(dev_sent_path, dev_amr_path, tokenizer, 'dev')
 
-    train_dataset = AMRToTextDataset(train_amr_path, train_sent_path, tokenizer, 'train')
-    dev_dataset = AMRToTextDataset(dev_amr_path, dev_sent_path, tokenizer, 'dev')
-    test_dataset = AMRToTextDataset(test_amr_path, test_sent_path, tokenizer, 'test')
-
-    train_loader = AMRToTextDataLoader(dataset=train_dataset, model_type=model_type, tokenizer=tokenizer,  max_seq_len_amr=max_seq_len_amr, max_seq_len_sent=max_seq_len_sent, 
+    train_loader = TextToAMRDataLoader(dataset=train_dataset, model_type=model_type, tokenizer=tokenizer,  max_seq_len_amr=max_seq_len_amr, max_seq_len_sent=max_seq_len_sent, 
                                         batch_size=batch_size, shuffle=True)  
-    test_loader = AMRToTextDataLoader(dataset=test_dataset, model_type=model_type, tokenizer=tokenizer,  max_seq_len_amr=max_seq_len_amr, max_seq_len_sent=max_seq_len_sent, 
-                                        batch_size=batch_size, shuffle=False)  
-    dev_loader = AMRToTextDataLoader(dataset=dev_dataset, model_type=model_type, tokenizer=tokenizer,  max_seq_len_amr=max_seq_len_amr, max_seq_len_sent=max_seq_len_sent, 
+    dev_loader = TextToAMRDataLoader(dataset=dev_dataset, model_type=model_type, tokenizer=tokenizer,  max_seq_len_amr=max_seq_len_amr, max_seq_len_sent=max_seq_len_sent, 
                                         batch_size=batch_size, shuffle=False)  
 
     print('len train dataset: ', str(len(train_dataset)))
     print('len dev dataset: ', str(len(dev_dataset)))
-    print('len test dataset:', str(len(test_dataset)))
 
     print('len train dataloader: ', str(len(train_loader)))
     
@@ -127,13 +115,22 @@ if __name__=='__main__':
         list_hyp, list_label = [], []
 
         train_pbar = tqdm(iter(train_loader), leave=True, total=len(train_loader))
+        if not cuda_used:
+            print("Warning: CUDA is not used during train")
+
         for i, batch_data in enumerate(train_pbar):
-            enc_batch = torch.LongTensor(batch_data[0]).cuda()
-            dec_batch = torch.LongTensor(batch_data[1]).cuda()
-            enc_mask_batch = torch.FloatTensor(batch_data[2]).cuda()
+            enc_batch = torch.LongTensor(batch_data[0])
+            dec_batch = torch.LongTensor(batch_data[1])
+            enc_mask_batch = torch.FloatTensor(batch_data[2])
             dec_mask_batch = None
-            label_batch = torch.LongTensor(batch_data[4]).cuda()
+            label_batch = torch.LongTensor(batch_data[4])
             token_type_batch = None
+
+            if cuda_used:
+                enc_batch = enc_batch.cuda()
+                dec_batch = dec_batch.cuda()
+                enc_mask_batch = enc_mask_batch.cuda()
+                label_batch = label_batch.cuda()
 
             outputs = model(input_ids=enc_batch, attention_mask=enc_mask_batch, decoder_input_ids=dec_batch, 
                         decoder_attention_mask=dec_mask_batch, labels=label_batch)
@@ -161,15 +158,24 @@ if __name__=='__main__':
         total_dev_loss = 0
 
         pbar = tqdm(iter(dev_loader), leave=True, total=len(dev_loader))
+        if not cuda_used:
+            print("Warning: CUDA is not used during dev")
+            
         for i, batch_data in enumerate(pbar):
             batch_seq = batch_data[-1]
 
-            enc_batch = torch.LongTensor(batch_data[0]).cuda()
-            dec_batch = torch.LongTensor(batch_data[1]).cuda()
-            enc_mask_batch = torch.FloatTensor(batch_data[2]).cuda()
+            enc_batch = torch.LongTensor(batch_data[0])
+            dec_batch = torch.LongTensor(batch_data[1])
+            enc_mask_batch = torch.FloatTensor(batch_data[2])
             dec_mask_batch = None
-            label_batch = torch.LongTensor(batch_data[4]).cuda()
+            label_batch = torch.LongTensor(batch_data[4])
             token_type_batch = None
+
+            if cuda_used:
+                enc_batch = enc_batch.cuda()
+                dec_batch = dec_batch.cuda()
+                enc_mask_batch = enc_mask_batch.cuda()
+                label_batch = label_batch.cuda()
 
             outputs = model(input_ids=enc_batch, attention_mask=enc_mask_batch, decoder_input_ids=dec_batch, 
                         decoder_attention_mask=dec_mask_batch, labels=label_batch)
@@ -182,8 +188,8 @@ if __name__=='__main__':
                 hyp = hyps[j,:].squeeze()
                 label = label_batch[j,:].squeeze()
 
-                batch_list_hyp.append(tokenizer.decode(hyp, skip_special_tokens=True))
-                batch_list_label.append(tokenizer.decode(label[label != -100], skip_special_tokens=True))
+                batch_list_hyp.append(tokenizer.decode(hyp[hyp != -100], skip_special_tokens=False))
+                batch_list_label.append(tokenizer.decode(label[label != -100], skip_special_tokens=False))
 
             list_hyp += batch_list_hyp
             list_label += batch_list_label
@@ -192,63 +198,17 @@ if __name__=='__main__':
             pbar.set_description("(Epoch {}) DEV LOSS:{:.4f} LR:{:.8f}".format((epoch+1),
                     total_dev_loss/(i+1), get_lr(optimizer)))
             
+        print("list_hyp:", *list_hyp, sep="\n")
+        print("list_label:", *list_label, sep="\n")
+        print()
+            
         bleu = calc_corpus_bleu_score(list_hyp, list_label)
         print('bleu score on dev: ', str(bleu))
 
         list_loss_dev.append(total_dev_loss/len(dev_loader))
 
     ## TEST
-    model.eval()
-    torch.set_grad_enabled(False)
-
-    list_hyp, list_label = [], []
-
-    pbar = tqdm(iter(test_loader), leave=True, total=len(test_loader))
-    for i, batch_data in enumerate(pbar):
-        batch_seq = batch_data[-1]
-
-        enc_batch = torch.LongTensor(batch_data[0])
-        dec_batch = torch.LongTensor(batch_data[1])
-        enc_mask_batch = torch.FloatTensor(batch_data[2])
-        dec_mask_batch = None
-        label_batch = torch.LongTensor(batch_data[4])
-        token_type_batch = None
-
-        # cuda
-        enc_batch = enc_batch.cuda()
-        dec_batch = dec_batch.cuda()
-        enc_mask_batch = enc_mask_batch.cuda() 
-        dec_mask_batch = None
-        label_batch = label_batch.cuda()
-        token_type_batch = None
-
-        hyps = model.generate(input_ids=enc_batch, attention_mask=enc_mask_batch, num_beams=num_beams, max_length=max_seq_len_sent, 
-                            early_stopping=True, pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id)
-
-
-        batch_list_hyp = []
-        batch_list_label = []
-        for j in range(len(hyps)):
-            hyp = hyps[j]
-            label = label_batch[j,:].squeeze()
-        
-            batch_list_hyp.append(tokenizer.decode(hyp, skip_special_tokens=True))
-            batch_list_label.append(tokenizer.decode(label[label != -100], skip_special_tokens=True))
-        
-        list_hyp += batch_list_hyp
-        list_label += batch_list_label
-
-    list_label = []
-    for i in range(len(list_hyp)):
-        if (i<5):
-            print('sample: ', list_hyp[i], '----', test_dataset.data['sent'][i])
-        list_label.append(test_dataset.data['sent'][i])
-    
-    ## BLEU SCORE
-    bleu = calc_corpus_bleu_score(list_hyp, list_label)
-    print('bleu score on test dataset: ', str(bleu))
-    with open(os.path.join(result_folder, 'bleu_score_test.txt'), 'w') as f:
-        f.write(str(bleu))
+    test_process(args, tokenizer, model)
 
     ## save loss data
     with open(os.path.join(result_folder, 'loss_data.tsv'), 'w') as f:
@@ -260,24 +220,5 @@ if __name__=='__main__':
     # torch.save(model.state_dict(), os.path.join(result_folder, "indot5.th"))
     tokenizer.save_pretrained(os.path.join(result_folder, "tokenizer"))
     model.save_pretrained(os.path.join(result_folder, "model"))
-
-    ## save generated outputs
-    with open(os.path.join(result_folder, 'test_generations.txt'), 'w') as f:
-        for i in range(len(list_hyp)):
-            e = list_hyp[i]
-            f.write(e)
-            if (i != len(list_hyp)-1):
-                f.write('\n')
-            
-    ## save label 
-    with open(os.path.join(result_folder, 'test_label.txt'), 'w') as f:
-        for i in range(len(list_label)):
-            e = list_label[i]
-            f.write(e)
-            if (i != len(list_label)-1):
-                f.write('\n')
-
     
-    print(generate("( ketik :ARG0 ( saya ) :ARG1 ( makalah ) ) )", model, tokenizer, num_beams, model_type, 'cpu'))    
-
-    
+    print(generate("saya mengetik makalah", model, tokenizer, num_beams, model_type, 'cpu'))    

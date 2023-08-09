@@ -7,8 +7,8 @@ def add_args(parser):
     parser.add_argument("--num_beams", type=int, default=5)
     parser.add_argument("--max_seq_len_amr", type=int, default=512)
     parser.add_argument("--max_seq_len_sent", type=int, default=384)
-    parser.add_argument("--result_folder", default='result')
-    parser.add_argument("--data_folder", default='../data/preprocessed_data/linearized_penman')
+    parser.add_argument("--result_folder", default='train/result')
+    parser.add_argument("--data_folder", default='data/preprocessed_data/linearized_penman')
     parser.add_argument("--saved_model_folder_path")
     parser.add_argument('--resume_from_checkpoint', default=False)
 

@@ -1,6 +1,4 @@
-*/__pycache__
-.vscode/
-env/
-best_model/
-process_xlsum_indonesian/graf_ringkasan/*
-demo_xlsum/*
+venv/
+private/
+**/__pycache__/
+**/result/

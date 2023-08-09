@@ -1,5 +1,4 @@
-indobenchmark-toolkit==0.0.4 
-sacrebleu==2.0.0 
-sentencepiece==0.1.95 
-tqdm==4.49.0 
-transformers==4.5.1
+transformers
+sacrebleu==2.0.0
+sentencepiece==0.1.99
+smatch
